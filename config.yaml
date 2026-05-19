@@ -38,8 +38,8 @@ specs:
 
 # llm generation settings
 generation:
-  provider: "openai"   # openai | anthropic | local
-  model: "gpt-4o"
+  provider: "gemini"   # gemini | openai | anthropic | local
+  model: "gemini-2.5-flash"
   temperature: 0.2
   max_tokens: 4096
   template_dir: "pipeline/templates"
