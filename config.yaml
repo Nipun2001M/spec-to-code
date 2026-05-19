@@ -1,0 +1,63 @@
+# project metadata
+project:
+  name: "spec-driven-pipeline"
+  version: "1.0.0"
+  description: "Automated code/output generation from structured specs"
+
+# paths used by the pipeline
+paths:
+  specs_raw:      "specs/raw"
+  specs_parsed:   "specs/parsed"
+  output_dir:     "output/generated"
+  reports_dir:    "output/reports"
+  audit_logs:     "audit/logs"
+  audit_traces:   "audit/traces"
+
+# pipeline execution settings
+pipeline:
+  stages:
+    - ingestion
+    - parsing
+    - validation
+    - generation
+    - output
+  fail_fast: true
+  retry:
+    max_attempts: 3
+    backoff_seconds: 2
+  concurrency: 4
+
+# spec ingestion settings
+specs:
+  accepted_formats:
+    - ".yaml"
+    - ".yml"
+    - ".json"
+  schema_file: "specs/spec_schema.py"
+  cache_parsed: true
+
+# llm generation settings
+generation:
+  provider: "openai"   # openai | anthropic | local
+  model: "gpt-4o"
+  temperature: 0.2
+  max_tokens: 4096
+  template_dir: "pipeline/templates"
+
+# output artefact settings
+output:
+  format: "python"        # python | json | markdown | sql
+  generate_report: true
+  overwrite: false
+
+# audit and observability
+audit:
+  enabled: true
+  log_level: "INFO"       # DEBUG | INFO | WARNING | ERROR
+  trace_every_stage: true
+  retention_days: 30
+
+# runtime flags (overridden by .env)
+env:
+  debug: false
+  dry_run: false
