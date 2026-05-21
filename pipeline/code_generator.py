@@ -17,7 +17,6 @@ CONFIG_PATH = Path("config.yaml")
 
 
 def _load_allowed_dirs(config_path: Path) -> list[Path]:
-    # reads output_dir from config.yaml and returns it as the only allowed root
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     output_dir = config.get("paths", {}).get("output_dir", "output/generated")
@@ -25,7 +24,6 @@ def _load_allowed_dirs(config_path: Path) -> list[Path]:
 
 
 def _is_path_allowed(filename: str, allowed_dirs: list[Path]) -> bool:
-    # resolves the target path and checks it sits inside one of the allowed dirs
     target = Path(filename).resolve()
     return any(
         target == allowed or allowed in target.parents
@@ -66,7 +64,6 @@ def _save_audit(spec_id: str, task_index: int, task: str, prompt: str,
                 response_text: str, result: dict) -> Path:
     AUDIT_TRACES_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    # strip Windows-illegal chars: \ / : * ? " < > | and collapse whitespace
     safe_task = re.sub(r'[\\/:*?"<>|]', '', task[:40]).strip().replace(" ", "_")
     file_name = f"{timestamp}_{spec_id}_task{task_index:02d}_{safe_task}.json"
     trace_path = AUDIT_TRACES_DIR / file_name
@@ -98,8 +95,8 @@ def _strip_fences(text: str) -> str:
 
 
 def _fix_invalid_escapes(text: str) -> str:
-    # Gemini sometimes embeds Python regex patterns (\w \d \s) in JSON string values.
-    # These are invalid JSON escapes. Double the backslash so JSON sees \\w, \\d, etc.
+    # Gemini sometimes puts Python regex patterns (\w \d \s) inside JSON strings.
+    # Those are invalid JSON escapes — double the backslash so the parser sees \\w.
     return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
 
 
@@ -110,13 +107,12 @@ def _parse_json(text: str) -> dict:
         return json.loads(_fix_invalid_escapes(text))
 
 
-def _on_rate_limit(attempt: int, max_retries: int) -> None:
+def _handle_rate_limit(attempt: int, max_retries: int, exc: Exception) -> None:
     if attempt == max_retries:
         raise RuntimeError(
-            "Gemini rate limit (429) exhausted after all retries. "
-            "Run with --model gemini-2.0-flash for a higher daily quota."
-        )
-    print(f"  [!] rate-limited (429) on attempt {attempt}/{max_retries}. Retrying in 65s ...")
+            "Rate limit hit after all retries. Try --model gemini-2.0-flash."
+        ) from exc
+    print(f"  [!] rate-limited on attempt {attempt}/{max_retries}. Retrying in 65s ...")
     time.sleep(65)
 
 
@@ -138,14 +134,11 @@ def _call_gemini(prompt: str, client: genai.Client, model_name: str) -> str:
             if attempt == max_retries:
                 raise
             wait = 2 ** attempt
-            print(
-                f"  [!] Gemini returned {exc.code} ({exc.status}) on attempt {attempt}/{max_retries}. "
-                f"Retrying in {wait}s ..."
-            )
+            print(f"  [!] server error on attempt {attempt}/{max_retries}. Retrying in {wait}s ...")
             time.sleep(wait)
         except genai_errors.ClientError as exc:
             if getattr(exc, "code", None) == 429:
-                _on_rate_limit(attempt, max_retries)
+                _handle_rate_limit(attempt, max_retries, exc)
             else:
                 raise
 
@@ -153,14 +146,9 @@ def _call_gemini(prompt: str, client: genai.Client, model_name: str) -> str:
 def generate_code(spec: dict, plan: dict,
                   model_name: str = "gemini-2.5-flash",
                   config_path: str = str(CONFIG_PATH)) -> list[dict]:
-    # generates code for every task in the plan
-    # returns list of dicts: {task, filename, content, written, skipped_reason}
-
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError(
-            "GEMINI_API_KEY (or GOOGLE_API_KEY) not set. Add it to your .env file."
-        )
+        raise EnvironmentError("GEMINI_API_KEY not set. Add it to your .env file.")
 
     allowed_dirs = _load_allowed_dirs(Path(config_path))
     print(f"[code_generator] allowed output dirs: {[str(d) for d in allowed_dirs]}")
@@ -186,7 +174,6 @@ def generate_code(spec: dict, plan: dict,
         result = {"task": task, "filename": None, "content": None,
                   "written": False, "skipped_reason": None}
 
-        # parse json response
         try:
             data = _parse_json(clean_text)
         except json.JSONDecodeError as exc:
@@ -211,7 +198,6 @@ def generate_code(spec: dict, plan: dict,
         result["filename"] = filename
         result["content"] = content
 
-        # path safety check
         if not _is_path_allowed(filename, allowed_dirs):
             reason = (
                 f"filename '{filename}' is outside allowed directories "
@@ -223,7 +209,6 @@ def generate_code(spec: dict, plan: dict,
             results.append(result)
             continue
 
-        # write file
         out_path = Path(filename)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
@@ -237,7 +222,6 @@ def generate_code(spec: dict, plan: dict,
 
         results.append(result)
 
-    # final summary
     written = sum(1 for r in results if r["written"])
     skipped = len(results) - written
     print(f"\n[code_generator] done — {written} file(s) written, {skipped} skipped.")

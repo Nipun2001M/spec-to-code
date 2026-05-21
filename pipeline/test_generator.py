@@ -29,7 +29,6 @@ def _format_acceptance_criteria(criteria: list[dict]) -> str:
 
 
 def _format_generated_code(code_results: list[dict]) -> str:
-    # only include files that were actually written
     parts = []
     for r in code_results:
         if r.get("written") and r.get("filename") and r.get("content"):
@@ -40,8 +39,7 @@ def _format_generated_code(code_results: list[dict]) -> str:
 def _build_unit_test_prompt(spec: dict, code_results: list[dict]) -> str:
     feature = spec.get("feature", "unknown feature")
     spec_id = spec.get("spec_id", "unknown")
-    criteria = spec.get("acceptance_criteria", [])
-    ac_block = _format_acceptance_criteria(criteria)
+    ac_block = _format_acceptance_criteria(spec.get("acceptance_criteria", []))
     code_block = _format_generated_code(code_results)
 
     return textwrap.dedent(f"""
@@ -72,8 +70,7 @@ def _build_unit_test_prompt(spec: dict, code_results: list[dict]) -> str:
 def _build_integration_test_prompt(spec: dict, code_results: list[dict]) -> str:
     feature = spec.get("feature", "unknown feature")
     spec_id = spec.get("spec_id", "unknown")
-    criteria = spec.get("acceptance_criteria", [])
-    ac_block = _format_acceptance_criteria(criteria)
+    ac_block = _format_acceptance_criteria(spec.get("acceptance_criteria", []))
     code_block = _format_generated_code(code_results)
 
     return textwrap.dedent(f"""
@@ -112,18 +109,17 @@ def _strip_fences(text: str) -> str:
 
 
 def _fix_invalid_escapes(text: str) -> str:
-    # Gemini sometimes embeds Python regex patterns (\w \d \s) in JSON string values.
-    # These are invalid JSON escapes. Double the backslash so JSON sees \\w, \\d, etc.
+    # Gemini sometimes puts Python regex patterns (\w \d \s) inside JSON strings.
+    # Those are invalid JSON escapes — double the backslash so the parser sees \\w.
     return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
 
 
-def _on_rate_limit(attempt: int, max_retries: int) -> None:
+def _handle_rate_limit(attempt: int, max_retries: int, exc: Exception) -> None:
     if attempt == max_retries:
         raise RuntimeError(
-            "Gemini rate limit (429) exhausted after all retries. "
-            "Run with --model gemini-2.0-flash for a higher daily quota."
-        )
-    print(f"  [!] rate-limited (429) on attempt {attempt}/{max_retries}. Retrying in 65s ...")
+            "Rate limit hit after all retries. Try --model gemini-2.0-flash."
+        ) from exc
+    print(f"  [!] rate-limited on attempt {attempt}/{max_retries}. Retrying in 65s ...")
     time.sleep(65)
 
 
@@ -145,14 +141,11 @@ def _call_gemini(prompt: str, client: genai.Client, model_name: str) -> str:
             if attempt == max_retries:
                 raise
             wait = 2 ** attempt
-            print(
-                f"  [!] Gemini returned {exc.code} ({exc.status}) on attempt {attempt}/{max_retries}. "
-                f"Retrying in {wait}s ..."
-            )
+            print(f"  [!] server error on attempt {attempt}/{max_retries}. Retrying in {wait}s ...")
             time.sleep(wait)
         except genai_errors.ClientError as exc:
             if getattr(exc, "code", None) == 429:
-                _on_rate_limit(attempt, max_retries)
+                _handle_rate_limit(attempt, max_retries, exc)
             else:
                 raise
 
@@ -178,9 +171,7 @@ def _save_audit(spec_id: str, label: str, prompt: str,
     return trace_path
 
 
-def _parse_and_write(raw_text: str, allowed_dirs: list[Path],
-                     label: str) -> dict:
-    # parses Gemini response and writes the test file if path is safe
+def _parse_and_write(raw_text: str, allowed_dirs: list[Path], label: str) -> dict:
     result = {"filename": None, "content": None, "written": False, "skipped_reason": None}
 
     cleaned = _strip_fences(raw_text)
@@ -203,12 +194,9 @@ def _parse_and_write(raw_text: str, allowed_dirs: list[Path],
     result["filename"] = filename
     result["content"] = content
 
-    # path safety — must be inside one of the allowed test dirs
     target = Path(filename).resolve()
     if not any(allowed in target.parents or target == allowed for allowed in allowed_dirs):
-        result["skipped_reason"] = (
-            f"'{filename}' is outside allowed test directories — skipped for safety"
-        )
+        result["skipped_reason"] = f"'{filename}' is outside allowed test directories — skipped for safety"
         return result
 
     out_path = Path(filename)
@@ -222,14 +210,9 @@ def _parse_and_write(raw_text: str, allowed_dirs: list[Path],
 
 def generate_tests(spec: dict, code_results: list[dict],
                    model_name: str = "gemini-2.5-flash") -> dict:
-    # generates unit and integration tests for the spec
-    # returns dict with keys: unit, integration (each a result dict)
-
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError(
-            "GEMINI_API_KEY (or GOOGLE_API_KEY) not set. Add it to your .env file."
-        )
+        raise EnvironmentError("GEMINI_API_KEY not set. Add it to your .env file.")
 
     client = genai.Client(api_key=api_key)
 
@@ -241,7 +224,6 @@ def generate_tests(spec: dict, code_results: list[dict],
 
     output = {}
 
-    # unit tests
     print(f"[test_generator] generating unit tests for '{spec_id}' ...")
     unit_prompt = _build_unit_test_prompt(spec, code_results)
     unit_raw = _call_gemini(unit_prompt, client, model_name)
@@ -256,7 +238,6 @@ def generate_tests(spec: dict, code_results: list[dict],
     print(f"  [audit] {trace.name}")
     output["unit"] = unit_result
 
-    # integration tests
     print(f"[test_generator] generating integration tests for '{spec_id}' ...")
     int_prompt = _build_integration_test_prompt(spec, code_results)
     int_raw = _call_gemini(int_prompt, client, model_name)

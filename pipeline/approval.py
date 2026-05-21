@@ -2,6 +2,18 @@ from __future__ import annotations
 import sys
 
 
+def _wrap_print(text: str, width: int = 56) -> None:
+    line = ""
+    for word in text.split():
+        if len(line) + len(word) + 1 > width:
+            print(f"  {line}")
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        print(f"  {line}")
+
+
 def _print_plan_summary(spec: dict, plan: dict) -> None:
     spec_id = spec.get("spec_id", "<unknown>")
     feature = spec.get("feature", "<unknown>")
@@ -15,18 +27,8 @@ def _print_plan_summary(spec: dict, plan: dict) -> None:
     for i, task in enumerate(tasks, 1):
         print(f"  {i}. {task}")
 
-    print(f"\nTechnical Design:")
-    design = plan.get("technical_design", "N/A")
-    # wrap long design text to 56 chars
-    words, line = [], ""
-    for word in design.split():
-        if len(line) + len(word) + 1 > 56:
-            print(f"  {line}")
-            line = word
-        else:
-            line = f"{line} {word}".strip()
-    if line:
-        print(f"  {line}")
+    print("\nTechnical Design:")
+    _wrap_print(plan.get("technical_design", "N/A"))
 
     impacted = plan.get("impacted_files", [])
     print(f"\nImpacted Files ({len(impacted)}):")
@@ -43,24 +45,13 @@ def _print_plan_summary(spec: dict, plan: dict) -> None:
         else:
             print(f"  ! {r}")
 
-    print(f"\nTest Strategy:")
-    strategy = plan.get("test_strategy", "N/A")
-    words, line = [], ""
-    for word in strategy.split():
-        if len(line) + len(word) + 1 > 56:
-            print(f"  {line}")
-            line = word
-        else:
-            line = f"{line} {word}".strip()
-    if line:
-        print(f"  {line}")
+    print("\nTest Strategy:")
+    _wrap_print(plan.get("test_strategy", "N/A"))
 
     print("\n" + "=" * 60)
 
 
 def request_approval(spec: dict, plan: dict) -> bool:
-    # prints the plan summary and prompts the user for approval
-    # returns True if approved, exits the process if rejected
     _print_plan_summary(spec, plan)
 
     while True:
