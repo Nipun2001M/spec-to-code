@@ -1,0 +1,83 @@
+# feature spec — user login
+# version: 1.0.0
+
+spec_id: "feat-001"
+feature: "User Login"
+status: "draft"           # draft | reviewed | approved
+owner: "auth-team"
+created_at: "2026-05-19"
+
+# why this feature exists
+objective: >
+  Allow registered users to securely authenticate into the platform
+  using their email and password, establishing a session for subsequent requests.
+
+# who benefits and what they need
+user_story:
+  as_a: "registered user"
+  i_want: "to log in with my email and password"
+  so_that: "I can access my account and personalised content"
+
+# rules the implementation must enforce
+business_rules:
+  - id: BR-001
+    rule: "Email must be verified before login is permitted"
+  - id: BR-002
+    rule: "Account must be locked after 5 consecutive failed attempts"
+  - id: BR-003
+    rule: "Lockout duration is 15 minutes; admin can unlock manually"
+  - id: BR-004
+    rule: "Passwords must be compared against a bcrypt hash — never plaintext"
+  - id: BR-005
+    rule: "Session tokens must expire after 24 hours of inactivity"
+
+# testable conditions that define done
+acceptance_criteria:
+  - id: AC-001
+    given: "a user with a verified account"
+    when: "they submit correct credentials"
+    then: "they receive a JWT access token and are redirected to the dashboard"
+  - id: AC-002
+    given: "a user submits an incorrect password"
+    when: "fewer than 5 attempts have been made"
+    then: "login fails with a generic error message — no account existence hint"
+  - id: AC-003
+    given: "a user fails login 5 times consecutively"
+    when: "the 5th failure is recorded"
+    then: "the account is locked and the user receives a lockout email"
+  - id: AC-004
+    given: "a locked account"
+    when: "15 minutes have elapsed"
+    then: "the account is automatically unlocked"
+  - id: AC-005
+    given: "a user with an unverified email"
+    when: "they attempt to log in"
+    then: "login is rejected with a prompt to verify their email"
+  - id: AC-006
+    given: "a valid session token"
+    when: "it has been idle for more than 24 hours"
+    then: "the token is invalidated and the user is logged out"
+
+# quality and operational requirements
+non_functional_requirements:
+  performance:
+    - "Login endpoint must respond within 300 ms at p95 under normal load"
+    - "System must handle 500 concurrent login requests without degradation"
+  security:
+    - "All traffic must be over HTTPS"
+    - "Tokens must be signed with RS256"
+    - "Failed login attempts must be logged with IP and timestamp"
+    - "Rate limiting: max 10 requests per minute per IP on the login endpoint"
+  availability:
+    - "Login service uptime target: 99.9%"
+  observability:
+    - "Emit structured logs for every login attempt (success and failure)"
+    - "Expose a /metrics endpoint with login success/failure counters"
+
+# explicitly excluded from this spec
+out_of_scope:
+  - "OAuth / social login (Google, GitHub) — covered in feat-002"
+  - "Two-factor authentication — covered in feat-003"
+  - "Password reset flow — covered in feat-004"
+  - "Admin login portal"
+  - "Remember-me / persistent sessions"

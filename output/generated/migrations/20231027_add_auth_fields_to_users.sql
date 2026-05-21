@@ -1,0 +1,15 @@
+-- UP
+ALTER TABLE users
+ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN last_failed_login_at TIMESTAMP WITH TIME ZONE NULL,
+ADD COLUMN lockout_until TIMESTAMP WITH TIME ZONE NULL;
+
+-- DOWN
+ALTER TABLE users
+DROP COLUMN is_verified,
+DROP COLUMN is_locked,
+DROP COLUMN failed_login_attempts,
+DROP COLUMN last_failed_login_at,
+DROP COLUMN lockout_until;
