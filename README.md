@@ -124,40 +124,34 @@ See `specs/raw/user_login.yaml` for a full example.
 ```
 spec-to-code/
 │
-├── pipeline.py                  # main entry point
-├── config.yaml                  # pipeline configuration
-├── .env.template                # environment variable template
-├── README.md
+├── pipeline.py           # entry point
+├── config.yaml
+├── .env.template
 │
 ├── specs/
-│   ├── raw/                     # drop spec files here
-│   ├── parsed/                  # cached parsed specs (auto-populated)
-│   ├── spec_loader.py           # loads yaml / json / md specs
-│   ├── spec_validator.py        # validates required fields
-│   └── spec_schema.py           # field definitions and constraints
+│   ├── raw/              # drop spec files here
+│   ├── spec_loader.py
+│   ├── spec_validator.py
+│   └── spec_schema.py
 │
 ├── pipeline/
-│   ├── planner.py               # Gemini: spec → plan
-│   ├── approval.py              # human-in-the-loop checkpoint
-│   ├── code_generator.py        # Gemini: plan tasks → code files
-│   ├── test_generator.py        # Gemini: acceptance criteria → tests
-│   └── quality_gates.py         # ruff, mypy, pytest, bandit
+│   ├── planner.py        # Gemini: spec → plan
+│   ├── approval.py       # human approval checkpoint
+│   ├── code_generator.py # Gemini: plan tasks → code files
+│   ├── test_generator.py # Gemini: acceptance criteria → tests
+│   └── quality_gates.py  # ruff, mypy, pytest, bandit
 │
 ├── output/
-│   ├── generated/               # generated code lands here
-│   └── reports/                 # HTML run reports (future)
+│   └── generated/        # generated code lands here
 │
 ├── tests/
-│   ├── unit/                    # generated unit tests land here
-│   ├── integration/             # generated integration tests land here
-│   └── conftest.py
+│   ├── unit/             # generated unit tests land here
+│   └── integration/      # generated integration tests land here
 │
 └── audit/
-    ├── audit_logger.py          # final audit JSON writer
-    ├── audit_schema.py
-    ├── trace_recorder.py
-    ├── logs/                    # final audit files + gate results
-    └── traces/                  # per-call Gemini prompt + response traces
+    ├── audit_logger.py
+    ├── logs/             # final audit JSON files
+    └── traces/           # per-call Gemini prompt + response traces
 ```
 
 ---

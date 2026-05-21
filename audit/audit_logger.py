@@ -23,7 +23,6 @@ def build_audit_record(
     test_results: dict,
     quality_gate_results: list[dict],
 ) -> dict:
-    # assembles the full audit record from all pipeline stage outputs
     return {
         "pipeline_run": {
             "completed_at": _now_iso(),
@@ -104,9 +103,6 @@ def save_audit(
     test_results: dict,
     quality_gate_results: list[dict],
 ) -> Path:
-    # builds and writes the final audit JSON file
-    # returns the path where it was saved
-
     AUDIT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     spec_id = spec.get("spec_id", "unknown")

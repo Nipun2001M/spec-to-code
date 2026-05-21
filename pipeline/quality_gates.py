@@ -2,46 +2,42 @@ from __future__ import annotations
 import sys
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 AUDIT_LOGS_DIR = Path("audit/logs")
+TARGET_PLACEHOLDER = "{target}"
 
-# gate definitions: name, command template (target path inserted at runtime)
 GATES = [
     {
         "name": "ruff",
-        "cmd": ["ruff", "check", "{target}"],
+        "cmd": ["ruff", "check", TARGET_PLACEHOLDER],
         "description": "linting",
     },
     {
         "name": "mypy",
-        "cmd": ["mypy", "{target}", "--ignore-missing-imports"],
+        "cmd": ["mypy", TARGET_PLACEHOLDER, "--ignore-missing-imports"],
         "description": "type checking",
     },
     {
         "name": "pytest",
-        "cmd": ["pytest", "{target}", "-v", "--tb=short"],
+        "cmd": ["pytest", TARGET_PLACEHOLDER, "-v", "--tb=short"],
         "description": "unit and integration tests",
     },
     {
         "name": "bandit",
-        "cmd": ["bandit", "-r", "{target}", "-ll"],
+        "cmd": ["bandit", "-r", TARGET_PLACEHOLDER, "-ll"],
         "description": "security scanning",
     },
 ]
 
 
 def _run_gate(gate: dict, target: str) -> dict:
-    cmd = [part.replace("{target}", target) for part in gate["cmd"]]
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    cmd = [part.replace(TARGET_PLACEHOLDER, target) for part in gate["cmd"]]
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         passed = proc.returncode == 0
         stdout = proc.stdout
         stderr = proc.stderr
@@ -92,15 +88,7 @@ def _print_result(result: dict) -> None:
 
 
 def run_quality_gates(target: str = ".", gates: list | None = None) -> list:
-    # runs all (or a named subset of) quality gates against target path
-    # stops and exits the pipeline on the first failure
-    # returns list of result dicts for all gates that ran
-
-    selected = (
-        [g for g in GATES if g["name"] in gates]
-        if gates
-        else GATES
-    )
+    selected = [g for g in GATES if g["name"] in gates] if gates else GATES
 
     print(f"\n[quality_gates] running {len(selected)} gate(s) on '{target}' ...")
     print("=" * 60)
@@ -117,7 +105,7 @@ def run_quality_gates(target: str = ".", gates: list | None = None) -> list:
         if not result["passed"]:
             print("\n" + "=" * 60)
             print(f"[quality_gates] PIPELINE STOPPED — '{result['gate']}' gate failed.")
-            print(f"  Fix the issue above and re-run the pipeline.")
+            print("  Fix the issue above and re-run the pipeline.")
             print(f"  Full details saved to: {log_path}")
             print("=" * 60)
             sys.exit(1)

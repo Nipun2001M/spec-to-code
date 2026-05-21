@@ -8,72 +8,66 @@ from specs.spec_schema import (
 
 
 class SpecValidationError(Exception):
-    # raised when one or more validation rules fail
     def __init__(self, spec_id: str, errors: list[str]):
         self.spec_id = spec_id
         self.errors = errors
         super().__init__(f"spec '{spec_id}' failed validation with {len(errors)} error(s)")
 
 
-def validate_spec(spec: dict) -> list[str]:
-    # returns a list of error strings; empty list means the spec is valid
-    errors = []
-    spec_id = spec.get("spec_id", "<unknown>")
-
-    # top-level required fields
-    for field in REQUIRED_TOP_LEVEL_FIELDS:
-        if field not in spec:
-            errors.append(f"missing required field: '{field}'")
-
-    # status must be one of the allowed values
+def _check_top_level(spec: dict) -> list[str]:
+    errors = [f"missing required field: '{f}'" for f in REQUIRED_TOP_LEVEL_FIELDS if f not in spec]
     status = spec.get("status")
     if status and status not in VALID_STATUSES:
         errors.append(f"invalid status '{status}'; must be one of {sorted(VALID_STATUSES)}")
-
-    # user_story sub-fields
-    user_story = spec.get("user_story", {})
-    if isinstance(user_story, dict):
-        for field in USER_STORY_FIELDS:
-            if field not in user_story:
-                errors.append(f"user_story missing field: '{field}'")
-    else:
-        errors.append("user_story must be a mapping")
-
-    # business_rules — must be a non-empty list with required keys
-    rules = spec.get("business_rules", [])
-    if not isinstance(rules, list) or len(rules) == 0:
-        errors.append("business_rules must be a non-empty list")
-    else:
-        for i, rule in enumerate(rules):
-            for field in BUSINESS_RULE_FIELDS:
-                if field not in rule:
-                    errors.append(f"business_rules[{i}] missing field: '{field}'")
-
-    # acceptance_criteria — must be a non-empty list with required keys
-    criteria = spec.get("acceptance_criteria", [])
-    if not isinstance(criteria, list) or len(criteria) == 0:
-        errors.append("acceptance_criteria must be a non-empty list")
-    else:
-        for i, ac in enumerate(criteria):
-            for field in ACCEPTANCE_CRITERIA_FIELDS:
-                if field not in ac:
-                    errors.append(f"acceptance_criteria[{i}] missing field: '{field}'")
-
-    # non_functional_requirements — must be a mapping
-    nfr = spec.get("non_functional_requirements")
-    if nfr is not None and not isinstance(nfr, dict):
-        errors.append("non_functional_requirements must be a mapping")
-
-    # out_of_scope — must be a list if present
-    oos = spec.get("out_of_scope")
-    if oos is not None and not isinstance(oos, list):
-        errors.append("out_of_scope must be a list")
-
     return errors
 
 
-def validate_spec_strict(spec: dict) -> None:
-    # raises SpecValidationError if any errors are found
-    errors = validate_spec(spec)
-    if errors:
-        raise SpecValidationError(spec.get("spec_id", "<unknown>"), errors)
+def _check_user_story(spec: dict) -> list[str]:
+    user_story = spec.get("user_story", {})
+    if not isinstance(user_story, dict):
+        return ["user_story must be a mapping"]
+    return [f"user_story missing field: '{f}'" for f in USER_STORY_FIELDS if f not in user_story]
+
+
+def _check_list_items(items: list, field_name: str, required_keys: list[str]) -> list[str]:
+    errors = []
+    for i, item in enumerate(items):
+        for key in required_keys:
+            if key not in item:
+                errors.append(f"{field_name}[{i}] missing field: '{key}'")
+    return errors
+
+
+def _check_business_rules(spec: dict) -> list[str]:
+    rules = spec.get("business_rules", [])
+    if not isinstance(rules, list) or len(rules) == 0:
+        return ["business_rules must be a non-empty list"]
+    return _check_list_items(rules, "business_rules", BUSINESS_RULE_FIELDS)
+
+
+def _check_acceptance_criteria(spec: dict) -> list[str]:
+    criteria = spec.get("acceptance_criteria", [])
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return ["acceptance_criteria must be a non-empty list"]
+    return _check_list_items(criteria, "acceptance_criteria", ACCEPTANCE_CRITERIA_FIELDS)
+
+
+def _check_optional_fields(spec: dict) -> list[str]:
+    errors = []
+    nfr = spec.get("non_functional_requirements")
+    if nfr is not None and not isinstance(nfr, dict):
+        errors.append("non_functional_requirements must be a mapping")
+    oos = spec.get("out_of_scope")
+    if oos is not None and not isinstance(oos, list):
+        errors.append("out_of_scope must be a list")
+    return errors
+
+
+def validate_spec(spec: dict) -> list[str]:
+    errors = []
+    errors.extend(_check_top_level(spec))
+    errors.extend(_check_user_story(spec))
+    errors.extend(_check_business_rules(spec))
+    errors.extend(_check_acceptance_criteria(spec))
+    errors.extend(_check_optional_fields(spec))
+    return errors

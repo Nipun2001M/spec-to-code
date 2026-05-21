@@ -4,17 +4,15 @@ import json
 import time
 import yaml
 import textwrap
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from google import genai
 from google.genai import types
 from google.genai import errors as genai_errors
 
-# audit traces directory — mirrors config.yaml paths.audit_traces
 AUDIT_TRACES_DIR = Path("audit/traces")
 
-# expected top-level keys in the plan returned by Gemini
 PLAN_REQUIRED_KEYS = {
     "tasks",
     "technical_design",
@@ -46,7 +44,7 @@ def _build_prompt(spec: dict) -> str:
 
 def _save_audit(spec_id: str, prompt: str, response_text: str, plan: dict) -> Path:
     AUDIT_TRACES_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     file_name = f"{timestamp}_{spec_id}_plan.json"
     trace_path = AUDIT_TRACES_DIR / file_name
 
@@ -68,11 +66,10 @@ def _validate_plan(plan: dict) -> list[str]:
 
 
 def run_planner(spec: dict, model_name: str = "gemini-2.5-flash") -> dict:
-    # resolve api key
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise EnvironmentError(
-            "GEMINI_API_KEY (or GOOGLE_API_KEY) not set. Add it to your .env file."
+            "GEMINI_API_KEY not set. Add it to your .env file."
         )
 
     spec_id = spec.get("spec_id", "unknown")
@@ -82,7 +79,6 @@ def run_planner(spec: dict, model_name: str = "gemini-2.5-flash") -> dict:
 
     client = genai.Client(api_key=api_key)
 
-    # Retry up to 3 times with exponential backoff for transient 503 errors
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
@@ -95,43 +91,34 @@ def run_planner(spec: dict, model_name: str = "gemini-2.5-flash") -> dict:
                     response_mime_type="application/json",
                 ),
             )
-            break  # success — exit the retry loop
+            break
         except genai_errors.ServerError as exc:
             if attempt == max_retries:
                 raise
             wait = 2 ** attempt
-            print(
-                f"[planner] Gemini returned {exc.code} ({exc.status}) on attempt {attempt}/{max_retries}. "
-                f"Retrying in {wait}s ..."
-            )
+            print(f"[planner] server error on attempt {attempt}/{max_retries}. Retrying in {wait}s ...")
             time.sleep(wait)
         except genai_errors.ClientError as exc:
             if getattr(exc, "code", None) == 429:
                 if attempt == max_retries:
                     raise RuntimeError(
-                        "[planner] Gemini rate limit (429) hit after all retries. "
-                        "You have likely exhausted your daily free-tier quota for this model. "
-                        "Run with --model gemini-2.0-flash which has a higher daily limit."
+                        "[planner] rate limit hit after all retries. "
+                        "Try --model gemini-2.0-flash which has a higher daily limit."
                     ) from exc
                 wait = 65
-                print(
-                    f"[planner] rate-limited (429) on attempt {attempt}/{max_retries}. "
-                    f"Retrying in {wait}s ..."
-                )
+                print(f"[planner] rate-limited on attempt {attempt}/{max_retries}. Retrying in {wait}s ...")
                 time.sleep(wait)
             else:
                 raise
 
     raw_text = response.text.strip()
 
-    # strip markdown fences if the model added them despite instructions
-    # handles: ```json\n...\n``` and ```\n...\n```
     if raw_text.startswith("```"):
         lines = raw_text.split("\n")
-        raw_text = "\n".join(lines[1:])  # drop opening fence line (``` or ```json)
+        raw_text = "\n".join(lines[1:])
     if raw_text.endswith("```"):
         lines = raw_text.split("\n")
-        raw_text = "\n".join(lines[:-1])  # drop closing fence line
+        raw_text = "\n".join(lines[:-1])
     raw_text = raw_text.strip()
 
     try:
@@ -139,11 +126,10 @@ def run_planner(spec: dict, model_name: str = "gemini-2.5-flash") -> dict:
     except json.JSONDecodeError as exc:
         trace_path = _save_audit(spec_id, prompt, raw_text, {})
         raise ValueError(
-            f"[planner] Gemini returned non-JSON output for spec '{spec_id}'. "
-            f"Raw response saved to {trace_path}. Parse error: {exc}"
+            f"[planner] Gemini returned non-JSON for spec '{spec_id}'. "
+            f"Raw response saved to {trace_path}. Error: {exc}"
         ) from exc
 
-    # validate plan shape
     errors = _validate_plan(plan)
     if errors:
         print(f"[planner] warning — plan for '{spec_id}' is missing keys:")
