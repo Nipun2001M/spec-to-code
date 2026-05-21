@@ -1,11 +1,15 @@
+from __future__ import annotations
 import os
 import json
+import time
 import yaml
 import textwrap
 from datetime import datetime
 from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from google.genai import errors as genai_errors
 
 # audit traces directory — mirrors config.yaml paths.audit_traces
 AUDIT_TRACES_DIR = Path("audit/traces")
@@ -76,24 +80,59 @@ def run_planner(spec: dict, model_name: str = "gemini-2.5-flash") -> dict:
 
     print(f"[planner] calling Gemini ({model_name}) for spec '{spec_id}' ...")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
+    client = genai.Client(api_key=api_key)
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.2,
-            max_output_tokens=4096,
-        ),
-    )
+    # Retry up to 3 times with exponential backoff for transient 503 errors
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json",
+                ),
+            )
+            break  # success — exit the retry loop
+        except genai_errors.ServerError as exc:
+            if attempt == max_retries:
+                raise
+            wait = 2 ** attempt
+            print(
+                f"[planner] Gemini returned {exc.code} ({exc.status}) on attempt {attempt}/{max_retries}. "
+                f"Retrying in {wait}s ..."
+            )
+            time.sleep(wait)
+        except genai_errors.ClientError as exc:
+            if getattr(exc, "code", None) == 429:
+                if attempt == max_retries:
+                    raise RuntimeError(
+                        "[planner] Gemini rate limit (429) hit after all retries. "
+                        "You have likely exhausted your daily free-tier quota for this model. "
+                        "Run with --model gemini-2.0-flash which has a higher daily limit."
+                    ) from exc
+                wait = 65
+                print(
+                    f"[planner] rate-limited (429) on attempt {attempt}/{max_retries}. "
+                    f"Retrying in {wait}s ..."
+                )
+                time.sleep(wait)
+            else:
+                raise
 
     raw_text = response.text.strip()
 
     # strip markdown fences if the model added them despite instructions
+    # handles: ```json\n...\n``` and ```\n...\n```
     if raw_text.startswith("```"):
-        raw_text = "\n".join(raw_text.split("\n")[1:])
+        lines = raw_text.split("\n")
+        raw_text = "\n".join(lines[1:])  # drop opening fence line (``` or ```json)
     if raw_text.endswith("```"):
-        raw_text = "\n".join(raw_text.split("\n")[:-1])
+        lines = raw_text.split("\n")
+        raw_text = "\n".join(lines[:-1])  # drop closing fence line
+    raw_text = raw_text.strip()
 
     try:
         plan = json.loads(raw_text)
